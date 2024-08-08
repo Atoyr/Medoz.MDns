@@ -1,4 +1,20 @@
-﻿// See https://aka.ms/new-console-template for more information
-var mdnsService = new Medoz.MDns.MDnsService();
-mdnsService.SendMDnsQuery("_airplay._tcp.local");
-mdnsService.ListenForResponses();
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+using Medoz.Mdns;
+
+class Program
+{
+    static void Main(string[] args)
+    {
+        CreateHostBuilder(args).Build().Run();
+    }
+
+    static IHostBuilder CreateHostBuilder(string[] args) =>
+        Host.CreateDefaultBuilder(args)
+            .ConfigureServices((context, services) =>
+            {
+                // Register other services
+                services.AddHostedService<MdnsClient>(); // Register Poller as a hosted service
+            });
+}
