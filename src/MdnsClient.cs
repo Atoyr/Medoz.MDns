@@ -20,6 +20,7 @@ public sealed class MdnsClient : IHostedService, IDisposable
     private bool _isRunning = false;
 
     public event EventHandler<Response> ResponseReceived;
+    public event EventHandler<Answer> ServiceDiscovered;
 
     public MdnsClient()
     {
@@ -71,6 +72,7 @@ public sealed class MdnsClient : IHostedService, IDisposable
 
     private void ReceiveMdnsResponses(CancellationToken stoppingToken)
     {
+        udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
         var endPoint = new IPEndPoint(IPAddress.Any, MdnsPort);
         _logger?.LogInformation("listening for mDNS responses...");
         while (!stoppingToken.IsCancellationRequested && _isRunning)
@@ -79,6 +81,16 @@ public sealed class MdnsClient : IHostedService, IDisposable
             var r = ParseMdnsResponse(response);
             _logger?.LogInformation("mDNS response received.", r);
             ResponseReceived?.Invoke(this, r);
+
+            // サービス発見時のイベントを発火
+            foreach (var record in r.Answers)
+            {
+                if (record.Type == 12) // PTRレコード
+                {
+                    _logger?.LogInformation("ServiceDiscovered.", record);
+                    ServiceDiscovered?.Invoke(this, record);
+                }
+            }
         }
     }
 
