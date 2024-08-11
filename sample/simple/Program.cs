@@ -15,6 +15,6 @@ class Program
             .ConfigureServices((context, services) =>
             {
                 // Register other services
-                services.AddHostedService<MdnsClient>(); // Register Poller as a hosted service
+                services.AddMdnsService();
             });
 }

@@ -8,30 +8,58 @@ using Microsoft.Extensions.Hosting;
 
 namespace Medoz.Mdns;
 
-public sealed class MdnsClient : IHostedService, IDisposable
+public class MdnsService : IHostedService, IDisposable
 {
-    private const int MdnsPort = 5353;
-    private const string MdnsAddress = "224.0.0.251";
-    private UdpClient udpClient;
+    protected const int MdnsPort = 5353;
+    protected const string MdnsAddress = "224.0.0.251";
+    protected UdpClient udpClient;
 
-    private ILogger<MdnsClient>? _logger;
+    private ILogger<MdnsService>? _logger;
 
-    private object _lock = new object();
-    private bool _isRunning = false;
+    protected object Lock = new object();
+    protected bool IsRunning = false;
 
     public event EventHandler<Response> ResponseReceived;
     public event EventHandler<Answer> ServiceDiscovered;
 
-    public MdnsClient()
+    public MdnsService()
     {
         udpClient = new UdpClient();
         udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
         udpClient.MulticastLoopback = true;
+        udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
     }
 
-    public MdnsClient(ILogger<MdnsClient> logger) : this()
+    public MdnsService(ILogger<MdnsService> logger) : this()
     {
         _logger = logger;
+    }
+
+    public async Task StartAsync(CancellationToken stoppingToken)
+    {
+        lock(Lock)
+        {
+            IsRunning = true;
+        }
+        await ReceiveMdnsResponsesAsync(stoppingToken);
+    }
+
+    public Task StopAsync(CancellationToken stoppingToken)
+    {
+        lock(Lock)
+        {
+            IsRunning = false;
+        }
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        lock(Lock)
+        {
+            IsRunning = false;
+        }
+        udpClient.Close();
     }
 
     public void SendMdnsQuery(string serviceName)
@@ -40,58 +68,6 @@ public sealed class MdnsClient : IHostedService, IDisposable
         var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
         udpClient.Send(query, query.Length, endPoint);
         _logger?.LogInformation("mDNS query sent.");
-    }
-
-    public Task StartAsync(CancellationToken stoppingToken)
-    {
-        lock(_lock)
-        {
-            _isRunning = true;
-        }
-        ReceiveMdnsResponses(stoppingToken);
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken stoppingToken)
-    {
-        lock(_lock)
-        {
-            _isRunning = false;
-        }
-        return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        lock(_lock)
-        {
-            _isRunning = false;
-        }
-        udpClient.Close();
-    }
-
-    private void ReceiveMdnsResponses(CancellationToken stoppingToken)
-    {
-        udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
-        var endPoint = new IPEndPoint(IPAddress.Any, MdnsPort);
-        _logger?.LogInformation("listening for mDNS responses...");
-        while (!stoppingToken.IsCancellationRequested && _isRunning)
-        {
-            byte[] response = udpClient.Receive(ref endPoint);
-            var r = ParseMdnsResponse(response);
-            _logger?.LogInformation("mDNS response received.", r);
-            ResponseReceived?.Invoke(this, r);
-
-            // サービス発見時のイベントを発火
-            foreach (var record in r.Answers)
-            {
-                if (record.Type == 12) // PTRレコード
-                {
-                    _logger?.LogInformation("ServiceDiscovered.", record);
-                    ServiceDiscovered?.Invoke(this, record);
-                }
-            }
-        }
     }
 
     private byte[] BuildMdnsQuery(string serviceName)
@@ -103,29 +79,85 @@ public sealed class MdnsClient : IHostedService, IDisposable
         return Encoding.ASCII.GetBytes(query.ToString());
     }
 
-    private Response ParseMdnsResponse(byte[] response)
+    private async Task ReceiveMdnsResponsesAsync(CancellationToken stoppingToken)
+    {
+        _logger?.LogInformation("listening for mDNS responses...");
+        while (!stoppingToken.IsCancellationRequested && IsRunning)
+        {
+            byte[] buffer;
+            try 
+            {
+                var result = await udpClient.ReceiveAsync(stoppingToken);
+                _logger?.LogInformation($"mDNS response received. host: {result.RemoteEndPoint.Address}, port: {result.RemoteEndPoint.Port}, length: {result.Buffer.Length}");
+                buffer = result.Buffer;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "mDNS response receive failed.");
+                throw;
+            }
+            var r = ParseMdnsResponse(buffer);
+            if (r is null) continue;
+
+            // レスポンス受信時のイベントを発火
+            ResponseReceived?.Invoke(this, r);
+
+            // サービス発見時のイベントを発火
+            foreach (var record in r.Answers)
+            {
+                if (record.Type == 12) // PTRレコード
+                {
+                    _logger?.LogInformation("ServiceDiscovered. Name: {0}, Type: {1}, Class: {2}, TTL: {3}, DataLength: {4}", record.Name, record.Type, record.Class, record.TTL, record.DataLength);
+                    _logger?.LogInformation("ServiceDiscovered: Data:", Encoding.UTF8.GetString(record.Data));
+                                       
+                    ServiceDiscovered?.Invoke(this, record);
+                }
+            }
+        }
+        _logger?.LogInformation("mDNS response receive canceled.");
+    }
+
+    private Response? ParseMdnsResponse(byte[] response)
     {
         // DNSヘッダーの解析
         int id = (response[0] << 8) | response[1];
         int flags = (response[2] << 8) | response[3];
-        int questionCount = (response[4] << 8) | response[5];
-        int answerCount = (response[6] << 8) | response[7];
+        int qdCount = (response[4] << 8) | response[5];
+        int anCount = (response[6] << 8) | response[7];
+        // NSCOUNT
+        int nsCount = (response[8] << 8) | response[9];
+        // ARCOUNT
+        int arCount = (response[10] << 8) | response[11];
 
-        Console.WriteLine($"ID: {id}, Flags: {flags}, Questions: {questionCount}, Answers: {answerCount}");
+        int totalRecords = qdCount + anCount + nsCount + arCount;
+        if (response.Length < 12 + (totalRecords * 16)) // 16バイトは一般的なレコードのサイズの推定値
+        {
+            _logger?.LogInformation("response length is too short.");
+            return null;
+        }
+
+        bool isTruncated = (flags & 0x0200) != 0;
+        _logger?.LogInformation("The message is truncated: {0}", isTruncated);
+
+        _logger?.LogInformation($"ID: {id}, Flags: {flags}, QDCOUNT: {qdCount}, ANCOUNT: {anCount}, NSCOUNT: {nsCount}, ARCOUNT: {arCount}");
 
         int offset = 12; // DNSヘッダーは12バイト
-        for (int i = 0; i < questionCount; i++)
+        for (int i = 0; i < qdCount; i++)
         {
             offset = SkipQuestion(response, offset);
         }
 
         List<Answer> answers = new();
-        for (int i = 0; i < answerCount; i++)
+        for (int i = 0; i < anCount; i++)
         {
             answers.Add(ParseAnswer(response, ref offset));
         }
 
-        return new Response(id, flags, questionCount, answerCount, offset, answers);
+        return new Response(id, flags, qdCount, anCount, offset, answers);
     }
 
     private int SkipQuestion(byte[] response, int offset)
@@ -174,7 +206,7 @@ public sealed class MdnsClient : IHostedService, IDisposable
         var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
 
         udpClient.Send(advertisement, advertisement.Length, endPoint);
-        Console.WriteLine("Service advertised.");
+        _logger.LogInformation("Service advertised.");
     }
 
     private byte[] BuildMdnsAdvertisement(string serviceName, string hostName, int port)
