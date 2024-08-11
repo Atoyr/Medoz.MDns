@@ -7,8 +7,8 @@ public static class ServiceCollectionExtension
 {
     public static IServiceCollection AddMdnsService(
             this IServiceCollection services
-            , Action<Response>? responseReceived = null
-            , Action<Answer>? serviceDiscovered = null)
+            , Action<ResponseEventArgs>? responseReceived = null
+            , Action<AnswerEventArgs>? serviceDiscovered = null)
     {
         services.AddSingleton<MdnsService>();
         services.AddSingleton<IHostedService>(sp => {
