@@ -117,8 +117,6 @@ public class MdnsService : IHostedService, IDisposable
 
             HandleIncomingPacket(buffer, remoteEndPoint);
 
-
-
             var r = ParseMdnsResponse(buffer);
             if (r is null) continue;
 
@@ -151,7 +149,7 @@ public class MdnsService : IHostedService, IDisposable
     {
         // DNSヘッダーの解析
         int id = (response[0] << 8) | response[1];
-        int flags = (response[2] << 8) | response[3];
+        Header header = Header.Parse(new byte[] { response[2], response[3] });
         int qdCount = (response[4] << 8) | response[5];
         int anCount = (response[6] << 8) | response[7];
         // NSCOUNT
@@ -162,14 +160,14 @@ public class MdnsService : IHostedService, IDisposable
         int totalRecords = qdCount + anCount + nsCount + arCount;
         if (response.Length < 12 + (totalRecords * 16)) // 16バイトは一般的なレコードのサイズの推定値
         {
-            _logger?.LogInformation("response length is too short.");
+            _logger?.LogWarning("response length is too short.");
+            _logger?.LogDebug($"response length: {response.Length}, qdCount: {qdCount}, anCount: {anCount}, nsCount: {nsCount}, arCount: {arCount}");
             return null;
         }
 
-        bool isTruncated = (flags & 0x0200) != 0;
-        _logger?.LogInformation("The message is truncated: {0}", isTruncated);
+        _logger?.LogInformation("The message is truncated: {0}", header.TruncatedMessage);
 
-        _logger?.LogDebug($"response parsed. ID: {id}, Flags: {flags}, QDCOUNT: {qdCount}, ANCOUNT: {anCount}, NSCOUNT: {nsCount}, ARCOUNT: {arCount}");
+        _logger?.LogDebug($"response parsed. ID: {id}, Header: {header}, QDCOUNT: {qdCount}, ANCOUNT: {anCount}, NSCOUNT: {nsCount}, ARCOUNT: {arCount}");
 
         int offset = 12; // DNSヘッダーは12バイト
         for (int i = 0; i < qdCount; i++)
@@ -183,7 +181,7 @@ public class MdnsService : IHostedService, IDisposable
             answers.Add(ParseAnswer(response, ref offset));
         }
 
-        return new Response(id, flags, qdCount, anCount, offset, answers);
+        return new Response(id, header, qdCount, anCount, offset, answers);
     }
 
     private int SkipQuestion(byte[] response, int offset)

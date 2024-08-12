@@ -2,7 +2,7 @@ namespace Medoz.Mdns;
 
 public record Response(
         int Id, 
-        int Flags, 
+        Header Header, 
         int QuestionCount, 
         int AnswerCount, 
         int Offset, 
