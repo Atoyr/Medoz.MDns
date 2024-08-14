@@ -116,15 +116,19 @@ public class MdnsService : IHostedService, IDisposable
             }
 
             HandleIncomingPacket(buffer, remoteEndPoint);
+            if (buffer.Length == 0)
+            {
+                _logger?.LogWarning("response length is 0.");
+            }
 
-            var r = ParseMdnsResponse(buffer);
-            if (r is null) continue;
+            var packet = ParsePacket(buffer);
+            if (packet is null) continue;
 
             // レスポンス受信時のイベントを発火
-            OnResponseReceived(new ResponseEventArgs(r));
+            OnResponseReceived(new ResponseEventArgs(packet));
 
             // サービス発見時のイベントを発火
-            foreach (var record in r.Answers)
+            foreach (var record in packet.Answers)
             {
                 if (record.Type == 12) // PTRレコード
                 {
@@ -145,54 +149,47 @@ public class MdnsService : IHostedService, IDisposable
         _logger?.LogDebug($"Received packet from {remoteEndPoint}: {receivedData}");
     }
 
-    private Response? ParseMdnsResponse(byte[] response)
+    private Packet? ParsePacket(byte[] response)
     {
-        // DNSヘッダーの解析
-        int id = (response[0] << 8) | response[1];
-        Header header = Header.Parse(new byte[] { response[2], response[3] });
-        int qdCount = (response[4] << 8) | response[5];
-        int anCount = (response[6] << 8) | response[7];
-        // NSCOUNT
-        int nsCount = (response[8] << 8) | response[9];
-        // ARCOUNT
-        int arCount = (response[10] << 8) | response[11];
-
-        int totalRecords = qdCount + anCount + nsCount + arCount;
-        if (response.Length < 12 + (totalRecords * 16)) // 16バイトは一般的なレコードのサイズの推定値
+        if (response.Length < 12)
         {
-            _logger?.LogWarning("response length is too short.");
-            _logger?.LogDebug($"response length: {response.Length}, qdCount: {qdCount}, anCount: {anCount}, nsCount: {nsCount}, arCount: {arCount}");
+            _logger?.LogWarning("The message is too short");
             return null;
         }
 
-        _logger?.LogInformation("The message is truncated: {0}", header.TruncatedMessage);
-
-        _logger?.LogDebug($"response parsed. ID: {id}, Header: {header}, QDCOUNT: {qdCount}, ANCOUNT: {anCount}, NSCOUNT: {nsCount}, ARCOUNT: {arCount}");
+        var header = Header.Parse(response[..12]);
+        _logger?.LogDebug($"response header parsed. {header}");
 
         int offset = 12; // DNSヘッダーは12バイト
-        for (int i = 0; i < qdCount; i++)
+        List<Question> questions = new();
+        for (int i = 0; i < header.QdCount; i++)
         {
-            offset = SkipQuestion(response, offset);
+            questions.Add(ParseQuestion(response, ref offset));
+            _logger?.LogDebug($"Parse question. {questions[^1]}");
         }
 
         List<Answer> answers = new();
-        for (int i = 0; i < anCount; i++)
+        for (int i = 0; i < header.AnCount; i++)
         {
             answers.Add(ParseAnswer(response, ref offset));
+            _logger?.LogDebug($"Parse answer. {answers[^1]}");
         }
 
-        return new Response(id, header, qdCount, anCount, offset, answers);
+        return new Packet(header, questions, answers);
     }
 
-    private int SkipQuestion(byte[] response, int offset)
+    private Question ParseQuestion(byte[] span, ref int offset)
     {
-        // 質問セクションをスキップ
-        while (response[offset] != 0)
+        if (span.Length < 5)
         {
-            offset += response[offset] + 1;
+            throw new ArgumentException("Invalid Question");
         }
-        offset += 5; // 終端バイト + QTYPE + QCLASS
-        return offset;
+
+        var name = ReadName(span, ref offset);
+        var type = (ushort)(span[offset] << 8 | span[offset + 1]);
+        var cls = (ushort)(span[offset + 2] << 8 | span[offset + 3]);
+        offset = offset + 4;
+        return new Question(name, type, cls);
     }
 
     private Answer ParseAnswer(byte[] response, ref int offset)

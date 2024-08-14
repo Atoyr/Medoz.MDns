@@ -7,9 +7,9 @@ namespace Medoz.Mdns;
 
 public class ResponseEventArgs : EventArgs
 {
-    public Response Response { get; }
+    public Packet Response { get; }
 
-    public ResponseEventArgs(Response response)
+    public ResponseEventArgs(Packet response)
     {
         Response = response;
     }
