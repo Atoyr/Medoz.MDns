@@ -130,7 +130,7 @@ public class MdnsService : IHostedService, IDisposable
             // サービス発見時のイベントを発火
             foreach (var record in packet.Answers)
             {
-                if (record.Type == 12) // PTRレコード
+                if (record.Type == DnsType.PTR) // PTRレコード
                 {
                     _logger?.LogInformation($"ServiceDiscovered. Name: {record.Name}");
                     _logger?.LogDebug($"ServiceDiscovered. Name: {record.Name}, Type: {record.Type}, Class: {record.Class}, TTL: {record.TTL}, DataLength: {record.DataLength}, Data: {Encoding.UTF8.GetString(record.Data)}");

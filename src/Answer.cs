@@ -2,9 +2,13 @@ namespace Medoz.Mdns;
 
 public record Answer(
         string Name, 
-        ushort Type, 
+        DnsType Type, 
         ushort Class, 
         uint TTL, 
         ushort DataLength, 
-        byte[] Data
-        );
+        byte[] Data)
+{
+    public Answer(string name, ushort type, ushort @class, uint ttl, ushort dataLength, byte[] data) : this(name, (DnsType)type, @class, ttl, dataLength, data) { }
+
+}
+        
