@@ -19,9 +19,9 @@ public class MdnsService : IHostedService, IDisposable
     protected object _lock = new object();
     protected bool _isRunning = false;
 
-    public event EventHandler<ResponseEventArgs> ResponseReceived;
-    public event EventHandler<AnswerEventArgs> ServiceDiscovered;
-    public event EventHandler<QueryEventArgs> QueryReceived;
+    public event EventHandler<ResponseEventArgs>? ResponseReceived;
+    public event EventHandler<AnswerEventArgs>? ServiceDiscovered;
+    public event EventHandler<QueryEventArgs>? QueryReceived;
 
     public MdnsService()
     {
@@ -227,7 +227,7 @@ public class MdnsService : IHostedService, IDisposable
         var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
 
         _udpClient.Send(advertisement, advertisement.Length, endPoint);
-        _logger.LogInformation("Service advertised.");
+        _logger?.LogInformation("Service advertised.");
     }
 
     private byte[] BuildMdnsAdvertisement(string serviceName, string hostName, int port)
