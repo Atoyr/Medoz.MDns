@@ -29,9 +29,6 @@ public class MdnsService : IHostedService, IDisposable
     public MdnsService()
     {
         _udpClient = new UdpClient();
-        _udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
-        _udpClient.MulticastLoopback = true;
-        _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
     }
 
     public MdnsService(ILogger<MdnsService> logger) : this()
@@ -41,8 +38,27 @@ public class MdnsService : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken stoppingToken)
     {
+        if (_isRunning)
+        {
+            return;
+        }
+
+        if (_udpClient.Client is null)
+        {
+            _udpClient = new UdpClient();
+        }
+
+        while(_udpClient.Client.IsBound && !stoppingToken.IsCancellationRequested)
+        {
+            _logger?.LogWarning($"UpdClient is already active. Wait for 1 second....");
+            await Task.Delay(1000);
+        }
+
         lock(_lock)
         {
+            _udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
+            _udpClient.MulticastLoopback = true;
+            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
             _isRunning = true;
         }
         await ReceiveMdnsAsync(stoppingToken);
@@ -71,24 +87,52 @@ public class MdnsService : IHostedService, IDisposable
     /// </summary>
     public void SendMdnsQuery(string serviceName)
     {
+        lock(_lock)
+        {
+            if (_isRunning == false)
+            {
+                _logger?.LogDebug("mDNS is not running. Start UdpClient.");
+                _udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
+                _udpClient.MulticastLoopback = true;
+                _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
+            }
+        }
+
         var query = BuildMdnsQuery(serviceName);
         var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
         _udpClient.Send(query, query.Length, endPoint);
-        _logger?.LogInformation("mDNS query sent.");
         _logger?.LogDebug($"mDNS query sent. serviceName: {serviceName}");
+
+        if (_isRunning == false)
+        {
+            _udpClient.Close();
+        }
     }
 
     
     /// <summary>
     /// mDNSクエリを生成します。
     /// </summary>
-    private byte[] BuildMdnsQuery(string serviceName)
+    internal byte[] BuildMdnsQuery(string serviceName, DnsType type = DnsType.PTR, DnsClass? cls = null)
     {
-        var query = new StringBuilder();
-        query.Append(serviceName);
-        query.Append("\0\0\x01\0\x01\0\0\0\0\0\0\0");
+        var query = new List<byte>();
 
-        return Encoding.ASCII.GetBytes(query.ToString());
+        // DNS Header
+        query.AddRange(new byte[] { 0x00, 0x00 }); // ID
+        query.AddRange(new byte[] { 0x00, 0x00 }); // Flags: Standard query, no recursion
+        query.AddRange(new byte[] { 0x00, 0x01 }); // QDCOUNT (1 question)
+        query.AddRange(new byte[] { 0x00, 0x00 }); // ANCOUNT (0 answers)
+        query.AddRange(new byte[] { 0x00, 0x00 }); // NSCOUNT (0 authority records)
+        query.AddRange(new byte[] { 0x00, 0x00 }); // ARCOUNT (0 additional records)
+
+        cls ??= DnsClass.IN;
+
+        // Question Section
+        query.AddRange(EncodeName(serviceName));   // Name: _airplay._tcp.local.
+        query.AddRange(BitConverter.GetBytes((ushort)type).Reverse()); // Type: PTR (type=12)
+        query.AddRange(BitConverter.GetBytes(cls.Value).Reverse()); // Class: IN (class=1)
+
+        return query.ToArray();
     }
 
     /// <summary>
@@ -183,7 +227,7 @@ public class MdnsService : IHostedService, IDisposable
             throw new ArgumentException("Invalid Question");
         }
 
-        var name = ReadName(span, ref offset);
+        var name = DecodeName(span, ref offset);
         var type = (ushort)(span[offset] << 8 | span[offset + 1]);
         var cls = (ushort)(span[offset + 2] << 8 | span[offset + 3]);
         offset = offset + 4;
@@ -192,7 +236,7 @@ public class MdnsService : IHostedService, IDisposable
 
     private Answer ParseAnswer(byte[] response, ref int offset)
     {
-        var name = ReadName(response, ref offset);
+        var name = DecodeName(response, ref offset);
         var type = (ushort)((response[offset++] << 8) | response[offset++]);
         var @class = (ushort)((response[offset++] << 8) | response[offset++]);
         var ttl = (uint)((response[offset++] << 24) | (response[offset++] << 16) | (response[offset++] << 8) | response[offset++]);
@@ -202,10 +246,29 @@ public class MdnsService : IHostedService, IDisposable
         return new Answer(name, type, @class, ttl, dataLength, data);
     }
 
+
     /// <summary>
-    /// メッセージから名前を生成します。
+    /// 名前をDNS形式にエンコードします。
     /// </summary>
-    private string ReadName(byte[] message, ref int offset)
+    internal byte[] EncodeName(string name)
+    {
+        var parts = name.Split('.');
+        var result = new List<byte>();
+
+        foreach (var part in parts)
+        {
+            result.Add((byte)part.Length);
+            result.AddRange(Encoding.ASCII.GetBytes(part));
+        }
+        result.Add(0); // Null byte at the end
+
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// DNS形式の名前をデコードします。
+    /// </summary>
+    internal string DecodeName(byte[] message, ref int offset)
     {
         var name = new StringBuilder();
         var length = message[offset++];
