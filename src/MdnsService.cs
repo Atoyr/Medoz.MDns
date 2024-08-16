@@ -103,9 +103,12 @@ public class MdnsService : IHostedService, IDisposable
         _udpClient.Send(query, query.Length, endPoint);
         _logger?.LogDebug($"mDNS query sent. serviceName: {serviceName}");
 
-        if (_isRunning == false)
+        lock(_lock)
         {
-            _udpClient.Close();
+            if (_isRunning == false)
+            {
+                _udpClient.Close();
+            }
         }
     }
 
