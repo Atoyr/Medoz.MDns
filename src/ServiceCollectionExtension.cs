@@ -7,20 +7,12 @@ public static class ServiceCollectionExtension
 {
     public static IServiceCollection AddMdnsService(
             this IServiceCollection services
-            , Action<ResponseEventArgs>? responseReceived = null
-            , Action<AnswerEventArgs>? serviceDiscovered = null)
+            , Action<MdnsService>? action = null) 
     {
         services.AddSingleton<MdnsService>();
         services.AddSingleton<IHostedService>(sp => {
                 var mdns = sp.GetRequiredService<MdnsService>();
-                if (responseReceived is not null)
-                {
-                    mdns.ResponseReceived += (sender, response) => responseReceived(response);
-                }
-                if (serviceDiscovered is not null)
-                {
-                    mdns.ServiceDiscovered += (sender, answer) => serviceDiscovered(answer);
-                }
+                action?.Invoke(mdns);
                 return mdns;
                 });
         return services;
