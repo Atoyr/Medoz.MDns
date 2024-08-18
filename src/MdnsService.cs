@@ -13,6 +13,7 @@ public class MdnsService : IHostedService, IDisposable
     private const int MdnsPort = 5353;
     private const string MdnsAddress = "224.0.0.251";
     private UdpClient _udpClient;
+    private Timer _advertisementTimer;
 
     private ILogger<MdnsService>? _logger;
 
@@ -26,6 +27,10 @@ public class MdnsService : IHostedService, IDisposable
     public event EventHandler<PacketReceiveEventArgs>? OnResponseReceived;
     public event EventHandler<PacketReceiveEventArgs>? OnQueryReceived;
 
+    public string IpAddress { get; private set; } = "127.0.0.1";
+
+    private List<Advertisement> Advertisements { get; } = new List<Advertisement>();
+
     public MdnsService()
     {
         _udpClient = new UdpClient();
@@ -34,6 +39,18 @@ public class MdnsService : IHostedService, IDisposable
     public MdnsService(ILogger<MdnsService> logger) : this()
     {
         _logger = logger;
+    }
+
+    public void SetIpAddress(string ipAddress)
+    {
+        lock(_lock)
+        {
+            if (_isRunning)
+            {
+                throw new InvalidOperationException("Cannot change IP address while running.");
+            }
+            IpAddress = ipAddress;
+        }
     }
 
     public async Task StartAsync(CancellationToken stoppingToken)
@@ -59,6 +76,9 @@ public class MdnsService : IHostedService, IDisposable
             _udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
             _udpClient.MulticastLoopback = true;
             _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
+
+            _advertisementTimer = new (AdvertisementTimerCallback, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+
             _isRunning = true;
         }
         await ReceiveMdnsAsync(stoppingToken);
@@ -68,6 +88,7 @@ public class MdnsService : IHostedService, IDisposable
     {
         lock(_lock)
         {
+            _advertisementTimer.Change(Timeout.Infinite, Timeout.Infinite);
             _isRunning = false;
         }
         return Task.CompletedTask;
@@ -108,11 +129,11 @@ public class MdnsService : IHostedService, IDisposable
             if (_isRunning == false)
             {
                 _udpClient.Close();
+                _udpClient.Dispose();
             }
         }
     }
 
-    
     /// <summary>
     /// mDNSクエリを生成します。
     /// </summary>
@@ -223,7 +244,7 @@ public class MdnsService : IHostedService, IDisposable
         return new Packet(header, questions, answers);
     }
 
-    private Question ParseQuestion(byte[] span, ref int offset)
+    internal static Question ParseQuestion(byte[] span, ref int offset)
     {
         if (span.Length < 5)
         {
@@ -237,7 +258,7 @@ public class MdnsService : IHostedService, IDisposable
         return new Question(name, type, cls);
     }
 
-    private Answer ParseAnswer(byte[] response, ref int offset)
+    internal static Answer ParseAnswer(byte[] response, ref int offset)
     {
         var name = DecodeName(response, ref offset);
         var type = (ushort)((response[offset++] << 8) | response[offset++]);
@@ -249,11 +270,10 @@ public class MdnsService : IHostedService, IDisposable
         return new Answer(name, type, @class, ttl, dataLength, data);
     }
 
-
     /// <summary>
     /// 名前をDNS形式にエンコードします。
     /// </summary>
-    internal byte[] EncodeName(string name)
+    internal static byte[] EncodeName(string name)
     {
         var parts = name.Split('.');
         var result = new List<byte>();
@@ -271,47 +291,71 @@ public class MdnsService : IHostedService, IDisposable
     /// <summary>
     /// DNS形式の名前をデコードします。
     /// </summary>
-    internal string DecodeName(byte[] message, ref int offset)
+    internal static string DecodeName(byte[] message, ref int offset)
     {
-        var name = new StringBuilder();
-        var length = message[offset++];
-        while (length != 0)
+        StringBuilder name = new StringBuilder();
+        bool jumped = false;
+        int originalOffset = offset;
+
+        while (true)
         {
-            if (name.Length > 0)
+            byte length = message[offset];
+
+            // Check if this is a pointer (first two bits are '11')
+            if ((length & 0xC0) == 0xC0)
             {
+                if (!jumped)
+                {
+                    originalOffset = offset + 2; // save for later
+                }
+                int pointer = ((length & 0x3F) << 8) | message[offset + 1];
+                offset = pointer;
+                jumped = true;
+            }
+            else if (length == 0)
+            {
+                offset++;
+                break;
+            }
+            else
+            {
+                offset++;
+                name.Append(Encoding.ASCII.GetString(message, offset, length));
+                offset += length;
                 name.Append(".");
             }
-            name.Append(Encoding.UTF8.GetString(message, offset, length));
-            offset += length;
-            length = message[offset++];
         }
-        return name.ToString();
+
+        if (jumped)
+        {
+            offset = originalOffset; // restore the original offset
+        }
+
+        return name.ToString().TrimEnd('.');
     }
 
+    // TODO 60秒ごとに再送する
     /// <summary>
     /// サービスを広告します。
     /// </summary>
-    public void AdvertiseService(string serviceName, string hostName, int port)
+    public void AdvertiseService(string serviceType, string serviceName, string hostName, int port, int ttl = 120)
     {
-        var advertisement = BuildMdnsAdvertisement(serviceName, hostName, port);
-        var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
-
-        _udpClient.Send(advertisement, advertisement.Length, endPoint);
-        _logger?.LogInformation("Service advertised.");
+        var advertisement = new Advertisement(serviceType, serviceName, hostName, IPAddress.Parse(IpAddress), (ushort)port, (ushort)ttl);
+        Advertisements.Add(advertisement);
+        _logger?.LogDebug($"register advertisement. {BitConverter.ToString(advertisement.ToBytes())}");
+        _logger?.LogInformation($"Service {serviceName} register advertisement.");
     }
 
-    private byte[] BuildMdnsAdvertisement(string serviceName, string hostName, int port)
+    private void AdvertisementTimerCallback(object args)
     {
-        var builder = new StringBuilder();
-        builder.Append(serviceName);
-        builder.Append("\0\0\x21\0\x01\0\0\0\x78\0");
-        builder.Append((char)hostName.Length);
-        builder.Append(hostName);
-        builder.Append("\0\0\x1c\0\x01\0\0\0\x78\0\x04");
-        builder.Append((char)(port >> 8));
-        builder.Append((char)(port & 0xff));
-
-        return Encoding.ASCII.GetBytes(builder.ToString());
+        _logger?.LogDebug($"Service advertised with Timer.");
+        var endPoint = new IPEndPoint(IPAddress.Parse(MdnsAddress), MdnsPort);
+        foreach(var advertisement in Advertisements)
+        {
+            var data = advertisement.ToBytes();
+            _udpClient.Send(data, data.Length, endPoint);
+            _logger?.LogDebug($"Service advertised with Timer. {advertisement}");
+        }
     }
 
     protected virtual void HandleDataReceived(byte[] buffer, IPEndPoint remoteEndPoint)

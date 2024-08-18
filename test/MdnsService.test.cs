@@ -10,8 +10,7 @@ public class MdnsServiceTest
     [Fact]
     public void EncodeName_Equal()
     {
-        MdnsService mdns = new();
-        var name = mdns.EncodeName("test.local");
+        var name = MdnsService.EncodeName("test.local");
 
         Assert.NotNull(name);
 
