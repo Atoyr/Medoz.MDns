@@ -2,6 +2,7 @@ using System.Net;
 
 namespace Medoz.Mdns;
 
+// TODO ResourceRecordに変更する
 public record Answer(
         string Name, 
         DnsType Type, 
@@ -20,16 +21,16 @@ public record Answer(
         bytes.AddRange(MdnsService.EncodeName(Name));
 
         // Typeを追加 (2バイト)
-        bytes.AddRange(BitConverter.GetBytes((ushort)Type));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness((ushort)Type));
 
         // Classを追加 (2バイト)
-        bytes.AddRange(BitConverter.GetBytes(Class.Value));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(Class.Value));
 
         // TTLを追加 (4バイト)
-        bytes.AddRange(BitConverter.GetBytes(TTL).Reverse());
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(TTL));
 
         // DataLengthを追加 (2バイト)
-        bytes.AddRange(BitConverter.GetBytes((ushort)Data.Length));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness((ushort)Data.Length));
 
         // Dataを追加 (可変長)
         if (Data is not null)
@@ -59,11 +60,11 @@ public record Answer(
     {
         var bytes = new List<byte>();
         // Priorityを追加
-        bytes.AddRange(BitConverter.GetBytes(priority));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(priority));
         // Weightを追加
-        bytes.AddRange(BitConverter.GetBytes(weight));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(weight));
         // Portを追加
-        bytes.AddRange(BitConverter.GetBytes(port));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness((ushort)port));
         // Targetを追加
         bytes.AddRange(MdnsService.EncodeName(target));
         return bytes.ToArray();

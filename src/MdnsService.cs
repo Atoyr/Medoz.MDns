@@ -28,12 +28,14 @@ public class MdnsService : IHostedService, IDisposable
     public event EventHandler<PacketReceiveEventArgs>? OnQueryReceived;
 
     public string IpAddress { get; private set; } = "127.0.0.1";
+    public string HostName { get; private set; }
 
     private List<Advertisement> Advertisements { get; } = new List<Advertisement>();
 
     public MdnsService()
     {
         _udpClient = new UdpClient();
+        HostName = Dns.GetHostName();
     }
 
     public MdnsService(ILogger<MdnsService> logger) : this()
@@ -237,7 +239,16 @@ public class MdnsService : IHostedService, IDisposable
         List<Answer> answers = new();
         for (int i = 0; i < header.AnCount; i++)
         {
-            answers.Add(ParseAnswer(response, ref offset));
+            var tempOffset = offset;
+            try
+            {
+                answers.Add(ParseAnswer(response, ref offset));
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, $"Parse answer failed. data: {BitConverter.ToString(response[tempOffset..offset])}");
+                continue;
+            }
             _logger?.LogDebug($"Parse answer. {answers[^1]}");
         }
 
@@ -275,6 +286,7 @@ public class MdnsService : IHostedService, IDisposable
     /// </summary>
     internal static byte[] EncodeName(string name)
     {
+        if (name.EndsWith(".")) name = name.Substring(0, name.Length - 1); // remove trailing dot (if present
         var parts = name.Split('.');
         var result = new List<byte>();
 
@@ -338,8 +350,12 @@ public class MdnsService : IHostedService, IDisposable
     /// <summary>
     /// サービスを広告します。
     /// </summary>
-    public void AdvertiseService(string serviceType, string serviceName, string hostName, int port, int ttl = 120)
+    public void AdvertiseService(string serviceType, string serviceName, int port, string hostName = "", int ttl = 120)
     {
+        if (string.IsNullOrEmpty(hostName))
+        {
+            hostName = HostName;
+        }
         var advertisement = new Advertisement(serviceType, serviceName, hostName, IPAddress.Parse(IpAddress), (ushort)port, (ushort)ttl);
         Advertisements.Add(advertisement);
         _logger?.LogDebug($"register advertisement. {BitConverter.ToString(advertisement.ToBytes())}");

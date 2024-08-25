@@ -18,7 +18,7 @@ class Program
                 services.AddMdnsService(mdns => {
                         mdns.SetIpAddress("192.168.0.1");
                         // mdns.SendMdnsQuery("test.local");
-                        mdns.AdvertiseService("_airplay._tcp.local.", "myService", "aaa", (ushort)7000);
+                        mdns.AdvertiseService("_airplay._tcp.local", "myService", (ushort)7000);
                         mdns.OnQueryReceived += (sender, args) => {
                             var len = args.Packet.Header.QdCount + args.Packet.Header.AnCount + args.Packet.Header.NsCount + args.Packet.Header.ArCount + 12;
                             Console.WriteLine($"!!! Query received !!! {len} bytes from {args.RemoteEndPoint}");

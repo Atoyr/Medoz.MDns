@@ -40,13 +40,13 @@ public class Advertisement
             false,
             0,
             0,
-            3,
+            1,
             0,
             2
             );
 
-        var host = $"{ServiceName}.{ServiceType}";
-        var service = Answer.GetHostData(host);
+        var service = $"{ServiceName}.{ServiceType}";
+        var serviceData = Answer.GetHostData(service);
         var target = $"{HostName}";
         var ptr = new Answer(
             ServiceType,
@@ -54,10 +54,10 @@ public class Advertisement
             DnsClass.IN.Value,
             TTL,
             0,
-            service
+            serviceData
             );
         var srv = new Answer(
-            host,
+            service,
             DnsType.SRV,
             DnsClass.IN.Value,
             TTL,
