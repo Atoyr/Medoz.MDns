@@ -7,9 +7,9 @@ namespace Medoz.Mdns;
 
 public class AnswerEventArgs : EventArgs
 {
-    public Answer Answer { get; }
+    public ResourceRecord Answer { get; }
 
-    public AnswerEventArgs(Answer answer)
+    public AnswerEventArgs(ResourceRecord answer)
     {
         Answer = answer;
     }

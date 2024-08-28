@@ -3,15 +3,15 @@ using System.Net;
 namespace Medoz.Mdns;
 
 // TODO ResourceRecordに変更する
-public record Answer(
+public record ResourceRecord(
         string Name, 
         DnsType Type, 
         DnsClass Class, 
         uint TTL, 
-        ushort DataLength, 
         byte[] Data)
 {
-    public Answer(string name, ushort type, ushort @class, uint ttl, ushort dataLength, byte[] data) : this(name, (DnsType)type, new DnsClass(@class), ttl, dataLength, data) { }
+    public ushort DataLength => (ushort)Data.Length;
+    public ResourceRecord(string name, ushort type, ushort @class, uint ttl, byte[] data) : this(name, (DnsType)type, new DnsClass(@class), ttl, data) { }
 
     public byte[] ToBytes() 
     {
@@ -30,7 +30,7 @@ public record Answer(
         bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(TTL));
 
         // DataLengthを追加 (2バイト)
-        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness((ushort)Data.Length));
+        bytes.AddRange(BitConverterHelper.GetBytesWithBigEdianness(DataLength));
 
         // Dataを追加 (可変長)
         if (Data is not null)

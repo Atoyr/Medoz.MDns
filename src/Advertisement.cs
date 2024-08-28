@@ -46,31 +46,28 @@ public class Advertisement
             );
 
         var service = $"{ServiceName}.{ServiceType}";
-        var serviceData = Answer.GetHostData(service);
+        var serviceData = ResourceRecord.GetHostData(service);
         var target = $"{HostName}";
-        var ptr = new Answer(
+        var ptr = new ResourceRecord(
             ServiceType,
             DnsType.PTR,
             DnsClass.IN.Value,
             TTL,
-            0,
             serviceData
             );
-        var srv = new Answer(
+        var srv = new ResourceRecord(
             service,
             DnsType.SRV,
             DnsClass.IN.Value,
             TTL,
-            0,
-            Answer.GetSRVData(0, 0, Port, target)
+            ResourceRecord.GetSRVData(0, 0, Port, target)
             );
-        var a = new Answer(
+        var a = new ResourceRecord(
             target,
             DnsType.A,
             DnsClass.IN.Value,
             TTL,
-            0,
-            Answer.GetAData(IpAddress)
+            ResourceRecord.GetAData(IpAddress)
             );
 
         var response = new List<byte>();

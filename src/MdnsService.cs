@@ -236,7 +236,7 @@ public class MdnsService : IHostedService, IDisposable
             _logger?.LogDebug($"Parse question. {questions[^1]}");
         }
 
-        List<Answer> answers = new();
+        List<ResourceRecord> answers = new();
         for (int i = 0; i < header.AnCount; i++)
         {
             var tempOffset = offset;
@@ -269,7 +269,7 @@ public class MdnsService : IHostedService, IDisposable
         return new Question(name, type, cls);
     }
 
-    internal static Answer ParseAnswer(byte[] response, ref int offset)
+    internal static ResourceRecord ParseAnswer(byte[] response, ref int offset)
     {
         var name = DecodeName(response, ref offset);
         var type = (ushort)((response[offset++] << 8) | response[offset++]);
@@ -278,7 +278,7 @@ public class MdnsService : IHostedService, IDisposable
         var dataLength = (ushort)((response[offset++] << 8) | response[offset++]);
         var data = response[offset..(offset + dataLength)];
         offset += dataLength;
-        return new Answer(name, type, @class, ttl, dataLength, data);
+        return new ResourceRecord(name, type, @class, ttl, data);
     }
 
     /// <summary>
