@@ -1,15 +1,20 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Medoz.Mdns;
 
-
-using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
-using var cts = new CancellationTokenSource();
-
-var server = new MdnsServer(factory.CreateLogger<MdnsClient>(), factory.CreateLogger<MdnsServer>());
-
-server.AdvertiseService("_airplay._tcp.local", "MyAirPlayDevice", 7000);
-
-await server.StartAsync(cts.Token);
+var host = Host.CreateDefaultBuilder(args)
+    .ConfigureServices((context, services) =>
+    {
+        services.AddMdnsService(mdns => {
+                mdns.OnQueryReceived += (sender, args) => {
+                    var len = args.Packet.Header.QdCount + args.Packet.Header.AnCount + args.Packet.Header.NsCount + args.Packet.Header.ArCount + 12;
+                    Console.WriteLine($"!!! Query received !!! {len} bytes from {args.RemoteEndPoint}");
+                };
+                });
+    });
+host.Build().Run();
 
 //var client = new MdnsClient(factory.CreateLogger<MdnsClient>());
 //await client.StartAsync(cts.Token);
+//
