@@ -36,6 +36,11 @@ public class MdnsService : IHostedService, IDisposable
     {
         _udpClient = new UdpClient();
         HostName = Dns.GetHostName();
+        var adrList = Dns.GetHostAddresses(HostName);
+        if (adrList.Length > 0)
+        {
+            IpAddress = adrList[0].ToString();
+        }
     }
 
     public MdnsService(ILogger<MdnsService> logger) : this()
