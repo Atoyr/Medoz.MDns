@@ -85,7 +85,7 @@ public class MdnsService : IHostedService, IDisposable
             _udpClient.MulticastLoopback = true;
             _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
 
-            _advertisementTimer = new (AdvertisementTimerCallback, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+            _advertisementTimer = new (AdvertisementTimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
             _isRunning = true;
         }
