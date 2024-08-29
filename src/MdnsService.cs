@@ -81,6 +81,7 @@ public class MdnsService : IHostedService, IDisposable
         lock(_lock)
         {
             _udpClient.JoinMulticastGroup(IPAddress.Parse(MdnsAddress));
+            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _udpClient.MulticastLoopback = true;
             _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsPort));
 
